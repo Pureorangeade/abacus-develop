@@ -85,23 +85,37 @@ void Langevin::restart(const std::string& global_readin_dir)
 
 void Langevin::post_force(void)
 {
-    if (mdp.my_rank == 0)
-    {
-        double t_target = MD_func::target_temp(step_ + step_rst_, mdp.md_nstep, mdp.md_tfirst, mdp.md_tlast);
-        ModuleBase::Vector3<double> fictitious_force;
-        for (int i = 0; i < ucell.nat; ++i)
-        {
-            fictitious_force = -allmass[i] * vel[i] / mdp.md_damp;
-            for (int j = 0; j < 3; ++j)
-            {
-                fictitious_force[j] += sqrt(24.0 * t_target * allmass[i] / mdp.md_damp / mdp.md_dt)
-                                       * (static_cast<double>(std::rand()) / RAND_MAX - 0.5);
-            }
-            total_force[i] = force[i] + fictitious_force;
-        }
-    }
-
+    double t_target = MD_func::target_temp(step_ + step_rst_, mdp.md_nstep, mdp.md_tfirst, mdp.md_tlast);
+    ModuleBase::Vector3<double> fictitious_force;
 #ifdef __MPI
-    MPI_Bcast(total_force, ucell.nat * 3, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    int size;
+    MPI_Comm_size(MPI_COMM_WORLD,&size);
+    int each_ucell_nat = ucell.nat / size;
+    int ucell_nat_begin = (each_ucell_nat) * mdp.my_rank;
+    int ucell_nat_end = ucell_nat_begin + each_ucell_nat;
+    if(mdp.my_rank == size - 1)
+    {
+        ucell_nat_end = ucell.nat;
+    }
+    for (int i = ucell_nat_begin; i < ucell_nat_end; ++i)
+    {
+        fictitious_force = -allmass[i] * vel[i] / mdp.md_damp;
+        for (int j = 0; j < 3; ++j)
+        {
+            fictitious_force[j] += sqrt(24.0 * t_target * allmass[i] / mdp.md_damp / mdp.md_dt)
+                                       * (static_cast<double>(std::rand()) / RAND_MAX - 0.5);
+        }
+        total_force[i] = force[i] + fictitious_force;
+    }
+for(int i = 0; i < size; i++){
+    int each_ucell_nat = ucell.nat / size;
+    int ucell_nat_begin = (each_ucell_nat) * i;
+    int ucell_nat_end = ucell_nat_begin + each_ucell_nat;
+    if(i == size - 1)
+    {
+        ucell_nat_end = ucell.nat;
+    }
+    MPI_Bcast(total_force + ucell_nat_begin, (ucell_nat_end - ucell_nat_begin) * 3, MPI_DOUBLE, i, MPI_COMM_WORLD);
+}
 #endif
 }
